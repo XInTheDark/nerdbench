@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nerdbench/nerdbench/internal/assets"
@@ -129,6 +130,143 @@ func (b Benchmark) runSQLite(ctx context.Context, req RunRequest) (RunOutput, bo
 		workers = 1
 	}
 	size := sqliteSize(req.Profile)
+	if req.Profile != "smoke" {
+		measured, err := runSQLiteTimed(ctx, worker.Path, workers, size, profileDuration(req.Profile))
+		if err != nil {
+			return RunOutput{
+				Duration:   measured.elapsed,
+				StdoutTail: runner.Tail(measured.stdout, 4096),
+				StderrTail: runner.Tail(measured.stderr, 4096),
+			}, true, err
+		}
+		if measured.completed == 0 || measured.elapsed <= 0 {
+			return RunOutput{
+				Duration:   measured.elapsed,
+				StdoutTail: runner.Tail(measured.stdout, 4096),
+				StderrTail: runner.Tail(measured.stderr, 4096),
+			}, true, fmt.Errorf("sqlite-speedtest: no completed runs")
+		}
+		value := float64(measured.completed) / measured.elapsed.Seconds()
+		return RunOutput{
+			Value:      value,
+			Duration:   measured.elapsed,
+			Iterations: uint64(measured.completed),
+			StdoutTail: runner.Tail(measured.stdout, 256),
+			StderrTail: runner.Tail(measured.stderr, 512),
+			Note:       "sqlite-speedtest embedded worker",
+		}, true, nil
+	}
+
+	measured, err := runSQLiteWorkers(ctx, worker.Path, workers, size, 1)
+	if err != nil {
+		return RunOutput{
+			Duration:   measured.elapsed,
+			StdoutTail: runner.Tail(measured.stdout, 4096),
+			StderrTail: runner.Tail(measured.stderr, 4096),
+		}, true, err
+	}
+	if measured.maxSeconds <= 0 {
+		return RunOutput{
+			Duration:   measured.elapsed,
+			StdoutTail: runner.Tail(measured.stdout, 4096),
+			StderrTail: runner.Tail(measured.stderr, 4096),
+		}, true, fmt.Errorf("sqlite-speedtest TOTAL line not found")
+	}
+	value := float64(workers) / measured.maxSeconds
+	return RunOutput{
+		Value:      value,
+		Duration:   measured.elapsed,
+		Iterations: uint64(workers),
+		StdoutTail: runner.Tail(measured.stdout, 256),
+		StderrTail: runner.Tail(measured.stderr, 512),
+		Note:       "sqlite-speedtest embedded worker",
+	}, true, nil
+}
+
+type sqliteRunResult struct {
+	maxSeconds float64
+	completed  int
+	elapsed    time.Duration
+	stdout     string
+	stderr     string
+}
+
+func runSQLiteTimed(ctx context.Context, workerPath string, workers, size int, target time.Duration) (sqliteRunResult, error) {
+	start := time.Now()
+	deadline := start.Add(target)
+	var stdoutAll, stderrAll string
+	var completed uint64
+	var stopped int32
+	var firstErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			dir := filepath.Join(filepath.Dir(workerPath), fmt.Sprintf("sqlite-%03d", index))
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				atomic.StoreInt32(&stopped, 1)
+				return
+			}
+			for time.Now().Before(deadline) && atomic.LoadInt32(&stopped) == 0 {
+				proc, err := runner.RunProcessInDir(
+					ctx,
+					dir,
+					workerPath,
+					"--memdb",
+					"--singlethread",
+					"--size", strconv.Itoa(size),
+					"--repeat", "1",
+					"--testset", "main",
+				)
+				if proc.Stdout != "" || proc.Stderr != "" {
+					mu.Lock()
+					stdoutAll += proc.Stdout
+					stderrAll += proc.Stderr
+					stdoutAll = runner.Tail(stdoutAll, 4096)
+					stderrAll = runner.Tail(stderrAll, 4096)
+					mu.Unlock()
+				}
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+					atomic.StoreInt32(&stopped, 1)
+					return
+				}
+				if parseSQLiteTotalSeconds(proc.Stdout+"\n"+proc.Stderr) <= 0 {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("sqlite-speedtest TOTAL line not found")
+					}
+					mu.Unlock()
+					atomic.StoreInt32(&stopped, 1)
+					return
+				}
+				atomic.AddUint64(&completed, 1)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	return sqliteRunResult{
+		completed: int(completed),
+		elapsed:   time.Since(start),
+		stdout:    stdoutAll,
+		stderr:    stderrAll,
+	}, firstErr
+}
+
+func runSQLiteWorkers(ctx context.Context, workerPath string, workers, size, repeat int) (sqliteRunResult, error) {
 	start := time.Now()
 	type oneRun struct {
 		seconds float64
@@ -142,7 +280,7 @@ func (b Benchmark) runSQLite(ctx context.Context, req RunRequest) (RunOutput, bo
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			dir := filepath.Join(filepath.Dir(worker.Path), fmt.Sprintf("sqlite-%03d", index))
+			dir := filepath.Join(filepath.Dir(workerPath), fmt.Sprintf("sqlite-%03d", index))
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				runs[index].err = err
 				return
@@ -150,11 +288,11 @@ func (b Benchmark) runSQLite(ctx context.Context, req RunRequest) (RunOutput, bo
 			proc, err := runner.RunProcessInDir(
 				ctx,
 				dir,
-				worker.Path,
+				workerPath,
 				"--memdb",
 				"--singlethread",
 				"--size", strconv.Itoa(size),
-				"--repeat", "1",
+				"--repeat", strconv.Itoa(repeat),
 				"--testset", "main",
 			)
 			runs[index].stdout = proc.Stdout
@@ -173,32 +311,29 @@ func (b Benchmark) runSQLite(ctx context.Context, req RunRequest) (RunOutput, bo
 		stdoutTail += run.stdout
 		stderrTail += run.stderr
 		if run.err != nil {
-			return RunOutput{
-				Duration:   elapsed,
-				StdoutTail: runner.Tail(stdoutTail, 4096),
-				StderrTail: runner.Tail(stderrTail, 4096),
-			}, true, run.err
+			return sqliteRunResult{
+				elapsed: elapsed,
+				stdout:  stdoutTail,
+				stderr:  stderrTail,
+			}, run.err
 		}
 		if run.seconds <= 0 {
-			return RunOutput{
-				Duration:   elapsed,
-				StdoutTail: runner.Tail(stdoutTail, 4096),
-				StderrTail: runner.Tail(stderrTail, 4096),
-			}, true, fmt.Errorf("sqlite-speedtest TOTAL line not found")
+			return sqliteRunResult{
+				elapsed: elapsed,
+				stdout:  stdoutTail,
+				stderr:  stderrTail,
+			}, nil
 		}
 		if run.seconds > maxSeconds {
 			maxSeconds = run.seconds
 		}
 	}
-	value := float64(workers) / maxSeconds
-	return RunOutput{
-		Value:      value,
-		Duration:   elapsed,
-		Iterations: uint64(workers),
-		StdoutTail: runner.Tail(stdoutTail, 256),
-		StderrTail: runner.Tail(stderrTail, 512),
-		Note:       "sqlite-speedtest embedded worker",
-	}, true, nil
+	return sqliteRunResult{
+		maxSeconds: maxSeconds,
+		elapsed:    elapsed,
+		stdout:     stdoutTail,
+		stderr:     stderrTail,
+	}, nil
 }
 
 func sqliteSize(profile string) int {
@@ -247,39 +382,67 @@ func (b Benchmark) runCRay(ctx context.Context, req RunRequest) (RunOutput, bool
 	if req.Mode == ModeSingle {
 		threads = 1
 	}
+	workDir := filepath.Dir(worker.Path)
 	width, height, samples, bounces := cRaySceneParams(req.Profile)
-	scene := cRayScene(width, height, samples, bounces, threads)
-	scenePath := filepath.Join(filepath.Dir(worker.Path), "scene.json")
-	if err := os.MkdirAll(filepath.Join(filepath.Dir(worker.Path), "output"), 0o700); err != nil {
-		return RunOutput{}, true, err
-	}
-	if err := os.WriteFile(scenePath, []byte(scene), 0o600); err != nil {
-		return RunOutput{}, true, err
+	if req.Profile != "smoke" {
+		calibWidth, calibHeight, calibSamples, calibBounces := cRayCalibrationSceneParams()
+		calib, err := runCRayScene(ctx, worker.Path, workDir, calibWidth, calibHeight, calibSamples, calibBounces, threads, "calibration-scene.json")
+		if err != nil {
+			return RunOutput{
+				Duration:   calib.elapsed,
+				StdoutTail: runner.Tail(calib.stdout, 4096),
+				StderrTail: runner.Tail(calib.stderr, 4096),
+			}, true, err
+		}
+		calibSeconds := calib.renderSeconds
+		if calibSeconds <= 0 {
+			calibSeconds = calib.elapsed.Seconds()
+		}
+		if calibSeconds > 0 {
+			targetSamples := float64(calibSamples) * profileDuration(req.Profile).Seconds() / calibSeconds
+			samples = maxInt(samples, int(math.Ceil(targetSamples)))
+			width = calibWidth
+			height = calibHeight
+			bounces = calibBounces
+		}
 	}
 
-	start := time.Now()
-	workDir := filepath.Dir(worker.Path)
-	proc, err := runner.RunProcessInDir(ctx, workDir, worker.Path, scenePath)
-	elapsed := time.Since(start)
+	measured, err := runCRayScene(ctx, worker.Path, workDir, width, height, samples, bounces, threads, "scene.json")
 	if err != nil {
 		return RunOutput{
-			Duration:   elapsed,
-			StdoutTail: runner.Tail(proc.Stdout, 4096),
-			StderrTail: runner.Tail(proc.Stderr, 4096),
+			Duration:   measured.elapsed,
+			StdoutTail: runner.Tail(measured.stdout, 4096),
+			StderrTail: runner.Tail(measured.stderr, 4096),
 		}, true, err
 	}
-	renderSeconds := parseCRaySeconds(proc.Stderr)
+	renderSeconds := measured.renderSeconds
 	if renderSeconds <= 0 {
-		renderSeconds = proc.Duration.Seconds()
+		renderSeconds = measured.elapsed.Seconds()
+	}
+	targetSeconds := profileDuration(req.Profile).Seconds()
+	if req.Profile != "smoke" && renderSeconds > 0 && renderSeconds < targetSeconds*0.8 {
+		samples = maxInt(samples+1, int(math.Ceil(float64(samples)*targetSeconds/renderSeconds)))
+		measured, err = runCRayScene(ctx, worker.Path, workDir, width, height, samples, bounces, threads, "scene.json")
+		if err != nil {
+			return RunOutput{
+				Duration:   measured.elapsed,
+				StdoutTail: runner.Tail(measured.stdout, 4096),
+				StderrTail: runner.Tail(measured.stderr, 4096),
+			}, true, err
+		}
+		renderSeconds = measured.renderSeconds
+		if renderSeconds <= 0 {
+			renderSeconds = measured.elapsed.Seconds()
+		}
 	}
 	paths := float64(width * height * samples)
 	value := paths / renderSeconds
 	return RunOutput{
 		Value:      value,
-		Duration:   elapsed,
+		Duration:   measured.elapsed,
 		Iterations: uint64(paths),
-		StdoutTail: runner.Tail(proc.Stdout, 512),
-		StderrTail: runner.Tail(proc.Stderr, 512),
+		StdoutTail: runner.Tail(measured.stdout, 512),
+		StderrTail: runner.Tail(measured.stderr, 512),
 		Note:       "c-ray embedded worker",
 	}, true, nil
 }
@@ -289,12 +452,44 @@ func cRaySceneParams(profile string) (width, height, samples, bounces int) {
 	case "smoke":
 		return 128, 128, 4, 4
 	case "quick":
-		return 256, 256, 12, 6
+		return 256, 256, 16, 6
 	case "extended":
-		return 512, 512, 32, 8
+		return 384, 384, 24, 8
 	default:
 		return 384, 384, 24, 8
 	}
+}
+
+func cRayCalibrationSceneParams() (width, height, samples, bounces int) {
+	return 384, 384, 24, 8
+}
+
+type cRayRunResult struct {
+	renderSeconds float64
+	elapsed       time.Duration
+	stdout        string
+	stderr        string
+}
+
+func runCRayScene(ctx context.Context, workerPath, workDir string, width, height, samples, bounces, threads int, sceneFile string) (cRayRunResult, error) {
+	scene := cRayScene(width, height, samples, bounces, threads)
+	scenePath := filepath.Join(workDir, sceneFile)
+	if err := os.MkdirAll(filepath.Join(workDir, "output"), 0o700); err != nil {
+		return cRayRunResult{}, err
+	}
+	if err := os.WriteFile(scenePath, []byte(scene), 0o600); err != nil {
+		return cRayRunResult{}, err
+	}
+
+	start := time.Now()
+	proc, err := runner.RunProcessInDir(ctx, workDir, workerPath, scenePath)
+	elapsed := time.Since(start)
+	return cRayRunResult{
+		renderSeconds: parseCRaySeconds(proc.Stderr),
+		elapsed:       elapsed,
+		stdout:        proc.Stdout,
+		stderr:        proc.Stderr,
+	}, err
 }
 
 func cRayScene(width, height, samples, bounces, threads int) string {
@@ -415,16 +610,7 @@ func (b Benchmark) runSysbench(ctx context.Context, req RunRequest) (RunOutput, 
 }
 
 func sysbenchCPUSeconds(profile string) int {
-	switch profile {
-	case "smoke":
-		return 1
-	case "quick":
-		return 3
-	case "extended":
-		return 20
-	default:
-		return 8
-	}
+	return maxInt(1, int(math.Round(profileDuration(profile).Seconds())))
 }
 
 var sysbenchEPSRE = regexp.MustCompile(`events per second:\s*([0-9.]+)`)
@@ -460,17 +646,23 @@ func (b Benchmark) runStockfish(ctx context.Context, req RunRequest) (RunOutput,
 	if req.Mode == ModeSingle {
 		threads = 1
 	}
-	runs := stockfishRuns(req.Profile)
 	var allNPS []float64
 	var stdoutAll, stderrAll string
+	var elapsed time.Duration
+	runtimeSeconds := stockfishRuntimeSeconds(req.Profile)
 
-	for i := 0; i < runs; i++ {
-		// Stockfish reads from stdin; use shell echo to pipe commands
-		input := fmt.Sprintf("uci\nsetoption name Threads value %d\nbench\nquit\n", threads)
-		shellCmd := fmt.Sprintf("echo '%s' | '%s'", input, worker.Path)
-		proc, err := runner.RunProcess(ctx, "/bin/sh", "-c", shellCmd)
+	for i := 0; i < stockfishRuns(req.Profile); i++ {
+		proc, err := runner.RunProcess(
+			ctx,
+			worker.Path,
+			"speedtest",
+			strconv.Itoa(threads),
+			"128",
+			strconv.Itoa(runtimeSeconds),
+		)
 		stdoutAll += proc.Stdout
 		stderrAll += proc.Stderr
+		elapsed += proc.Duration
 		if err != nil {
 			continue
 		}
@@ -490,7 +682,7 @@ func (b Benchmark) runStockfish(ctx context.Context, req RunRequest) (RunOutput,
 	median := medianFloat64(allNPS)
 	return RunOutput{
 		Value:      median,
-		Duration:   time.Duration(0),
+		Duration:   elapsed,
 		Iterations: 0,
 		StdoutTail: runner.Tail(stdoutAll, 256),
 		StderrTail: runner.Tail(stderrAll, 512),
@@ -499,16 +691,11 @@ func (b Benchmark) runStockfish(ctx context.Context, req RunRequest) (RunOutput,
 }
 
 func stockfishRuns(profile string) int {
-	switch profile {
-	case "smoke":
-		return 1
-	case "quick":
-		return 2
-	case "extended":
-		return 5
-	default:
-		return 3
-	}
+	return 1
+}
+
+func stockfishRuntimeSeconds(profile string) int {
+	return maxInt(1, int(math.Round(profileDuration(profile).Seconds())))
 }
 
 var stockfishNPSRE = regexp.MustCompile(`Nodes/second\s*:\s*([0-9.]+)`)
@@ -592,16 +779,8 @@ func (b Benchmark) runOpenSSL(ctx context.Context, req RunRequest) (RunOutput, b
 }
 
 func opensslSeconds(profile string) int {
-	switch profile {
-	case "smoke":
-		return 1
-	case "quick":
-		return 2
-	case "extended":
-		return 8
-	default:
-		return 4
-	}
+	blockSizes := 6
+	return maxInt(1, int(math.Ceil(profileDuration(profile).Seconds()/float64(blockSizes))))
 }
 
 var opensslKRE = regexp.MustCompile(`([0-9.]+)k`)
@@ -649,7 +828,7 @@ func (b Benchmark) runZstd(ctx context.Context, req RunRequest) (RunOutput, bool
 	if err != nil {
 		return RunOutput{}, true, err
 	}
-	proc, err := runner.RunProcess(ctx, worker.Path, "-b1", "-i1", "-T"+fmt.Sprintf("%d", threads), corpusPath)
+	proc, err := runner.RunProcess(ctx, worker.Path, "-b1", "-i"+strconv.Itoa(zstdIterationSeconds(req.Profile)), "-T"+fmt.Sprintf("%d", threads), corpusPath)
 	if err != nil {
 		return RunOutput{
 			StdoutTail: runner.Tail(proc.Stdout, 4096),
@@ -697,12 +876,16 @@ func zstdCorpusBytes(profile string) int {
 	case "smoke":
 		return 1 << 20
 	case "quick":
-		return 8 << 20
+		return 16 << 20
 	case "extended":
-		return 64 << 20
+		return 128 << 20
 	default:
-		return 32 << 20
+		return 64 << 20
 	}
+}
+
+func zstdIterationSeconds(profile string) int {
+	return maxInt(1, int(math.Ceil(profileDuration(profile).Seconds()/3)))
 }
 
 var zstdMBsRE = regexp.MustCompile(`([0-9.]+)\s+MB/s`)
@@ -748,30 +931,79 @@ func (b Benchmark) runGGML(ctx context.Context, req RunRequest) (RunOutput, bool
 		threads = 1
 	}
 
-	proc, err := runner.RunProcess(ctx, worker.Path, "--threads", fmt.Sprintf("%d", threads))
-	if err != nil {
-		return RunOutput{
-			StdoutTail: runner.Tail(proc.Stdout, 4096),
-			StderrTail: runner.Tail(proc.Stderr, 4096),
-		}, true, err
+	iterations := 10
+	if req.Profile != "smoke" {
+		calibration, err := runGGMLIterations(ctx, worker.Path, threads, iterations)
+		if err != nil {
+			return RunOutput{
+				Duration:   calibration.duration,
+				StdoutTail: runner.Tail(calibration.stdout, 4096),
+				StderrTail: runner.Tail(calibration.stderr, 4096),
+			}, true, err
+		}
+		if calibration.duration > 0 {
+			iterations = maxInt(iterations, int(math.Ceil(float64(iterations)*profileDuration(req.Profile).Seconds()/calibration.duration.Seconds())))
+		}
 	}
 
-	value := parseGGMLResult(proc.Stdout + "\n" + proc.Stderr)
+	measured, err := runGGMLIterations(ctx, worker.Path, threads, iterations)
+	if err != nil {
+		return RunOutput{
+			Duration:   measured.duration,
+			StdoutTail: runner.Tail(measured.stdout, 4096),
+			StderrTail: runner.Tail(measured.stderr, 4096),
+		}, true, err
+	}
+	target := profileDuration(req.Profile)
+	if req.Profile != "smoke" && measured.duration > 0 && measured.duration < target*8/10 {
+		iterations = maxInt(iterations+1, int(math.Ceil(float64(iterations)*target.Seconds()/measured.duration.Seconds())))
+		measured, err = runGGMLIterations(ctx, worker.Path, threads, iterations)
+		if err != nil {
+			return RunOutput{
+				Duration:   measured.duration,
+				StdoutTail: runner.Tail(measured.stdout, 4096),
+				StderrTail: runner.Tail(measured.stderr, 4096),
+			}, true, err
+		}
+	}
+
+	value := parseGGMLResult(measured.stdout + "\n" + measured.stderr)
 	if value <= 0 {
 		return RunOutput{
-			StdoutTail: runner.Tail(proc.Stdout, 4096),
-			StderrTail: runner.Tail(proc.Stderr, 4096),
+			Duration:   measured.duration,
+			StdoutTail: runner.Tail(measured.stdout, 4096),
+			StderrTail: runner.Tail(measured.stderr, 4096),
 		}, true, fmt.Errorf("ggml-ml-kernel: could not parse result")
 	}
 
 	return RunOutput{
 		Value:      value,
-		Duration:   proc.Duration,
-		Iterations: 0,
-		StdoutTail: runner.Tail(proc.Stdout, 256),
-		StderrTail: runner.Tail(proc.Stderr, 512),
+		Duration:   measured.duration,
+		Iterations: uint64(iterations),
+		StdoutTail: runner.Tail(measured.stdout, 256),
+		StderrTail: runner.Tail(measured.stderr, 512),
 		Note:       "ggml-ml-kernel embedded worker",
 	}, true, nil
+}
+
+type ggmlRunResult struct {
+	duration time.Duration
+	stdout   string
+	stderr   string
+}
+
+func runGGMLIterations(ctx context.Context, workerPath string, threads, iterations int) (ggmlRunResult, error) {
+	proc, err := runner.RunProcess(
+		ctx,
+		workerPath,
+		"--threads", strconv.Itoa(threads),
+		"--iter", strconv.Itoa(iterations),
+	)
+	return ggmlRunResult{
+		duration: proc.Duration,
+		stdout:   proc.Stdout,
+		stderr:   proc.Stderr,
+	}, err
 }
 
 var ggmlResultRE = regexp.MustCompile(`NERDBENCH_GGML_RESULT:([0-9.]+)`)
@@ -803,29 +1035,62 @@ func (b Benchmark) runTinyCC(ctx context.Context, req RunRequest) (RunOutput, bo
 	}
 	defer worker.Cleanup()
 
-	nFiles := tinyCCFiles(req.Profile)
+	threads := req.Threads
+	if req.Mode == ModeSingle {
+		threads = 1
+	}
 	workDir := filepath.Dir(worker.Path)
-	sources, err := writeTinyCCCorpus(workDir, nFiles)
+	sources, err := writeTinyCCCorpusWithComplexity(workDir, tinyCCCorpusFiles(req.Profile), tinyCCFunctionsPerFile(req.Profile))
 	if err != nil {
 		return RunOutput{}, true, err
 	}
 
 	start := time.Now()
+	deadline := start.Add(profileDuration(req.Profile))
 	var stdoutAll, stderrAll string
+	var nextID uint64
 	var compiled uint64
-	for i, source := range sources {
-		obj := filepath.Join(workDir, fmt.Sprintf("tinycc-%04d.o", i))
-		proc, err := runner.RunProcess(ctx, worker.Path, "-c", "-o", obj, source)
-		stdoutAll += proc.Stdout
-		stderrAll += proc.Stderr
-		if err != nil {
-			return RunOutput{
-				Duration:   time.Since(start),
-				StdoutTail: runner.Tail(stdoutAll, 4096),
-				StderrTail: runner.Tail(stderrAll, 4096),
-			}, true, err
-		}
-		compiled++
+	var stopped int32
+	var firstErr error
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for workerID := 0; workerID < threads; workerID++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+			for time.Now().Before(deadline) && atomic.LoadInt32(&stopped) == 0 {
+				id := atomic.AddUint64(&nextID, 1) - 1
+				source := sources[int(id)%len(sources)]
+				obj := filepath.Join(workDir, fmt.Sprintf("tinycc-%03d-%08d.o", workerID, id))
+				proc, err := runner.RunProcess(ctx, worker.Path, "-c", "-o", obj, source)
+				if proc.Stdout != "" || proc.Stderr != "" {
+					mu.Lock()
+					stdoutAll += proc.Stdout
+					stderrAll += proc.Stderr
+					mu.Unlock()
+				}
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					mu.Unlock()
+					atomic.StoreInt32(&stopped, 1)
+					return
+				}
+				atomic.AddUint64(&compiled, 1)
+			}
+		}(workerID)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return RunOutput{
+			Duration:   time.Since(start),
+			StdoutTail: runner.Tail(stdoutAll, 4096),
+			StderrTail: runner.Tail(stderrAll, 4096),
+		}, true, firstErr
 	}
 	elapsed := time.Since(start)
 	if compiled == 0 || elapsed <= 0 {
@@ -848,19 +1113,40 @@ func (b Benchmark) runTinyCC(ctx context.Context, req RunRequest) (RunOutput, bo
 }
 
 func tinyCCFiles(profile string) int {
+	return tinyCCCorpusFiles(profile)
+}
+
+func tinyCCCorpusFiles(profile string) int {
 	switch profile {
 	case "smoke":
-		return 10
+		return 16
 	case "quick":
-		return 30
+		return 64
 	case "extended":
-		return 200
+		return 512
 	default:
-		return 50
+		return 256
+	}
+}
+
+func tinyCCFunctionsPerFile(profile string) int {
+	switch profile {
+	case "smoke":
+		return 4
+	case "quick":
+		return 16
+	case "extended":
+		return 96
+	default:
+		return 64
 	}
 }
 
 func writeTinyCCCorpus(dir string, nFiles int) ([]string, error) {
+	return writeTinyCCCorpusWithComplexity(dir, nFiles, 1)
+}
+
+func writeTinyCCCorpusWithComplexity(dir string, nFiles, functionsPerFile int) ([]string, error) {
 	templates := []string{
 		"int fib_%[1]d(int n){if(n<=1)return n;return fib_%[1]d(n-1)+fib_%[1]d(n-2);} int f_%[1]d(void){return fib_%[1]d(%[2]d);}\n",
 		"int gcd_%[1]d(int a,int b){while(b){int t=b;b=a%%b;a=t;}return a;} int f_%[1]d(void){return gcd_%[1]d(%[2]d,%[3]d);}\n",
@@ -870,8 +1156,18 @@ func writeTinyCCCorpus(dir string, nFiles int) ([]string, error) {
 	paths := make([]string, 0, nFiles)
 	for i := 0; i < nFiles; i++ {
 		path := filepath.Join(dir, fmt.Sprintf("tinycc-%04d.c", i))
-		body := fmt.Sprintf(templates[i%len(templates)], i, 11+i%17, 29+i%31)
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		var body strings.Builder
+		for j := 0; j < functionsPerFile; j++ {
+			id := i*functionsPerFile + j
+			body.WriteString(fmt.Sprintf(templates[id%len(templates)], id, 11+id%17, 29+id%31))
+		}
+		body.WriteString(fmt.Sprintf("int tinycc_entry_%d(void){int s=0;", i))
+		for j := 0; j < functionsPerFile; j++ {
+			id := i*functionsPerFile + j
+			body.WriteString(fmt.Sprintf("s+=f_%d();", id))
+		}
+		body.WriteString("return s;}\n")
+		if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
 			return nil, err
 		}
 		paths = append(paths, path)
@@ -879,14 +1175,12 @@ func writeTinyCCCorpus(dir string, nFiles int) ([]string, error) {
 	return paths, nil
 }
 
-// Runtime budgets per profile (target wall-clock per test module per mode).
-// Standard profile targets ~15 min on high-end CPU, ~30 min on low-end VPS.
-// Smoke profile must complete in under 1 minute total for CI.
+// Runtime budgets per profile, per test module and mode.
 var profileBudgets = map[string]time.Duration{
-	"smoke":    100 * time.Millisecond,
-	"quick":    400 * time.Millisecond,
-	"standard": 800 * time.Millisecond,
-	"extended": 2 * time.Second,
+	"smoke":    1 * time.Second,
+	"quick":    5 * time.Second,
+	"standard": 18 * time.Second,
+	"extended": 75 * time.Second,
 }
 
 func profileDuration(profile string) time.Duration {
@@ -894,6 +1188,13 @@ func profileDuration(profile string) time.Duration {
 		return d
 	}
 	return profileBudgets["standard"]
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func DefaultBenchmarks() []Benchmark {

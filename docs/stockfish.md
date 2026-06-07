@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Stockfish is the chess-engine workload candidate. It is valuable because `stockfish bench` is well-known, CPU-heavy, and naturally supports thread counts.
+Stockfish is the chess-engine workload candidate. It is valuable because `stockfish speedtest` is CPU-heavy, runtime-controlled, and naturally supports thread counts.
 
 ## Source
 
@@ -23,9 +23,9 @@ If Stockfish is embedded in the default NerdBench binary, the clean project-leve
 
 ## Run Modes
 
-- Single-core: run `stockfish bench` with one thread.
-- Multi-core: run `stockfish bench` with the selected thread count.
-- Use three measured runs and score the median.
+- Single-core: run `stockfish speedtest 1 128 <seconds>`.
+- Multi-core: run `stockfish speedtest <threads> 128 <seconds>`.
+- Use the profile runtime budget for `<seconds>`.
 
 ## Metric
 
@@ -34,4 +34,4 @@ If Stockfish is embedded in the default NerdBench binary, the clean project-leve
 
 ## Scoring
 
-This is one test module. Use the median nodes-per-second result from measured runs as the normalized metric for both single and multi mode.
+This is one test module. Use the nodes-per-second result from the budgeted `speedtest` run as the normalized metric for both single and multi mode.

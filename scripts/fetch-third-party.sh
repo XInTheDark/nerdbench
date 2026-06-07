@@ -24,11 +24,11 @@ fetch_git() {
 fetch_git "c-ray" "https://github.com/vkoskiv/c-ray.git" "7f67117f341e26a748ceb7cd5746ce6a913f8a68"
 fetch_git "sqlite" "https://github.com/sqlite/sqlite.git" "version-3.53.2"
 fetch_git "sysbench" "https://github.com/akopytov/sysbench.git" "1.0.20"
-fetch_git "stockfish" "https://github.com/official-stockfish/Stockfish.git" "sf_16.1"
+fetch_git "stockfish" "https://github.com/official-stockfish/Stockfish.git" "sf_18"
 fetch_git "openssl" "https://github.com/openssl/openssl.git" "openssl-3.4.1"
 fetch_git "zstd" "https://github.com/facebook/zstd.git" "v1.5.7"
 fetch_git "llama.cpp" "https://github.com/ggml-org/llama.cpp.git" "b4549"
-fetch_git "tinycc" "https://github.com/TinyCC/tinycc.git" "release_0_9_27"
+fetch_git "tinycc" "https://github.com/TinyCC/tinycc.git" "b8f680a3b45325592c5c1270056ad6f0fb1f7e29"
 
 # Create sources.lock
 cat > "$repo_root/third_party/sources.lock" <<EOF
@@ -37,11 +37,11 @@ cat > "$repo_root/third_party/sources.lock" <<EOF
 c-ray https://github.com/vkoskiv/c-ray.git 7f67117f341e26a748ceb7cd5746ce6a913f8a68
 sqlite https://github.com/sqlite/sqlite.git version-3.53.2
 sysbench https://github.com/akopytov/sysbench.git 1.0.20
-stockfish https://github.com/official-stockfish/Stockfish.git sf_16.1
+stockfish https://github.com/official-stockfish/Stockfish.git sf_18
 openssl https://github.com/openssl/openssl.git openssl-3.4.1
 zstd https://github.com/facebook/zstd.git v1.5.7
 llama.cpp https://github.com/ggml-org/llama.cpp.git b4549
-tinycc https://github.com/TinyCC/tinycc.git release_0_9_27
+tinycc https://github.com/TinyCC/tinycc.git b8f680a3b45325592c5c1270056ad6f0fb1f7e29
 EOF
 
 echo "fetched third-party sources into $src_root" >&2

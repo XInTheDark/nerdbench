@@ -175,11 +175,14 @@ build_ggml() {
     -DCMAKE_BUILD_TYPE=Release \
     -DGGML_NATIVE=OFF \
     -DGGML_CPU=ON \
+    -DGGML_ACCELERATE=OFF \
     -DGGML_AVX=OFF \
     -DGGML_AVX2=OFF \
+    -DGGML_BLAS=OFF \
     -DGGML_F16C=OFF \
     -DGGML_FMA=OFF \
     -DGGML_LLAMAFILE=OFF \
+    -DGGML_METAL=OFF \
     -DGGML_OPENMP=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_TESTS=OFF \
@@ -293,7 +296,7 @@ for f in "$embed_dir"/*-"$target"; do
     c-ray-*)            var="cRay"; bench="c-ray"; src_url="https://github.com/vkoskiv/c-ray"; lic="MIT"; cmd="c-ray scene.json"; bf="make OPT=${OPT:--O2}" ;;
     sqlite-speedtest-*) var="sqliteSpeedtest"; bench="sqlite-speedtest"; src_url="https://github.com/sqlite/sqlite"; lic="Public Domain"; cmd="sqlite-speedtest --memdb --size N --repeat 1 --testset main"; bf="-O2 -DSQLITE_THREADSAFE=0" ;;
     sysbench-*)         var="sysbenchWorker"; bench="sysbench"; src_url="https://github.com/akopytov/sysbench"; lic="GPL-2.0-or-later"; cmd="sysbench cpu --threads=N run"; bf="--without-mysql --without-pgsql" ;;
-    stockfish-*)        var="stockfishWorker"; bench="stockfish"; src_url="https://github.com/official-stockfish/Stockfish"; lic="GPL-3.0"; cmd="stockfish bench"; bf="build ARCH=default" ;;
+    stockfish-*)        var="stockfishWorker"; bench="stockfish"; src_url="https://github.com/official-stockfish/Stockfish"; lic="GPL-3.0"; cmd="stockfish speedtest N 128 S"; bf="build ARCH=default" ;;
     openssl-speed-*)    var="opensslSpeed"; bench="openssl-speed"; src_url="https://github.com/openssl/openssl"; lic="Apache-2.0"; cmd="openssl speed"; bf="no-shared no-dso no-engine" ;;
     zstd-*)             var="zstdWorker"; bench="zstd"; src_url="https://github.com/facebook/zstd"; lic="BSD-3-Clause"; cmd="zstd -b1"; bf="libzstd.a" ;;
     ggml-ml-kernel-*)   var="ggmlMlKernel"; bench="ggml-ml-kernel"; src_url="https://github.com/ggml-org/llama.cpp"; lic="MIT"; cmd="ggml-ml-kernel --threads N"; bf="-O2 -lggml -lggml-cpu" ;;

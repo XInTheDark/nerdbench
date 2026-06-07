@@ -27,9 +27,9 @@ Both text and JSON output return non-zero when any test module fails.
 | Profile    | Target Runtime | Description |
 |------------|----------------|-------------|
 | `smoke`    | < 1 minute     | Quick CI validation with minimal workloads |
-| `quick`    | ~ 5 minutes    | Short benchmark run |
-| `standard` | ~ 15 minutes   | Full benchmark suite (default) |
-| `extended` | ~ 30 minutes   | Extended workloads for thorough testing |
+| `quick`    | ~ 1-2 minutes  | Short benchmark run |
+| `standard` | ~ 5 minutes    | Full benchmark suite (default) |
+| `extended` | ~ 20 minutes   | Extended workloads for thorough testing |
 
 ## JSON Output
 
@@ -82,7 +82,7 @@ NerdBench can be called as an external benchmark tool. For example, you can
 Example:
 
 ```sh
-curl -fsSL https://example.invalid/nerdbench/bench.sh | sh -s -- --profile standard --format json --progress none -o /tmp/nerdbench.json
+curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh -s -- --profile standard --format json --progress none -o /tmp/nerdbench.json
 ```
 
 NerdBench is licensed under GPL-3.0-or-later. YABS may call NerdBench as a separate GPL program and parse its output, similar to how it calls other external benchmark tools.

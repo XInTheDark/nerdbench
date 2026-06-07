@@ -9,9 +9,9 @@ func TestParseStockfishNPS(t *testing.T) {
 		want float64
 	}{
 		{
-			name: "standard",
-			log:  "Nodes searched  : 25738921\nNodes/second    : 428981.33\n",
-			want: 428981.33,
+			name: "speedtest",
+			log:  "Total nodes searched       : 2099917842\nTotal search time [s]      : 153.937\nNodes/second               : 13641410\n",
+			want: 13641410,
 		},
 		{
 			name: "in_bench_output",

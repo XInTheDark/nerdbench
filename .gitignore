@@ -10,3 +10,4 @@
 !/calibration/runs/.gitkeep
 *.json.tmp
 PLAN.md
+AGENTS.md
