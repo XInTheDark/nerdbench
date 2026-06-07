@@ -17,7 +17,7 @@ import (
 	"github.com/nerdbench/nerdbench/internal/system"
 )
 
-const version = "0.1.0-dev"
+var version = "0.1.0-dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {

@@ -46,16 +46,19 @@ jobs:
           fi
 
       - name: Build Go binary
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           grep -q 'OS:         "${{ matrix.goos }}"' internal/assets/generated_workers.go
           grep -q 'Arch:       "${{ matrix.goarch }}"' internal/assets/generated_workers.go
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o dist/nerdbench-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/nerdbench
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags "-X main.version=${VERSION}" -o dist/nerdbench-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/nerdbench
 
       - name: Verify binary runs
         run: |
           if [ "${{ matrix.goarch }}" = "amd64" ]; then
             ./dist/nerdbench-${{ matrix.goos }}-${{ matrix.goarch }} --version
+            test "$(./dist/nerdbench-${{ matrix.goos }}-${{ matrix.goarch }} --version)" = "${{ github.ref_name }}"
           fi
 
       - uses: actions/upload-artifact@v4
