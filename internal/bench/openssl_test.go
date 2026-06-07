@@ -21,7 +21,7 @@ func TestParseOpenSSLOps(t *testing.T) {
 		{
 			name: "single_algorithm",
 			log:  "sha256   98765.43k   234567.89k   345678.90k",
-			want:  98765.43,
+			want: 98765.43,
 		},
 	}
 	for _, tt := range tests {
