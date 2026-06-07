@@ -36,6 +36,19 @@ sha256() {
   fi
 }
 
+download_file() {
+  url="$1"
+  dst="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$dst"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$dst" "$url"
+  else
+    echo "curl or wget is required to download $url" >&2
+    exit 1
+  fi
+}
+
 install_worker() {
   src="$1"
   dst="$2"
@@ -62,6 +75,8 @@ sysbench_extra_ldflags=""
 c_ray_static=""
 zstd_system_libs="HAVE_ZLIB=0 HAVE_LZMA=0 HAVE_LZ4=0"
 ggml_libs="-lggml -lggml-base -lggml-cpu -lc++"
+stockfish_smallnet="nn-4ca89e4b3abf.nnue"
+stockfish_smallnet_url="https://tests.stockfishchess.org/api/nn/$stockfish_smallnet"
 if [ "$target_os" = "linux" ]; then
   static_ldflags="-static"
   sysbench_extra_ldflags="--with-extra-ldflags=-all-static"
@@ -120,6 +135,82 @@ build_sysbench() {
   fi
 }
 
+patch_stockfish_smallnet() {
+  make_dir="$1"
+  net="$2"
+  python3 - "$make_dir" "$net" <<'PY'
+from pathlib import Path
+import sys
+
+make_dir = Path(sys.argv[1])
+net = sys.argv[2]
+root = make_dir.parent
+
+replacements = {
+    "scripts/net.sh": [
+        ("fetch_network EvalFileDefaultNameBig && \\\nfetch_network EvalFileDefaultNameSmall", "fetch_network EvalFileDefaultNameBig"),
+    ],
+    "src/engine.cpp": [
+        ('std::make_unique<NN::Networks>(NN::EvalFile{EvalFileDefaultNameBig, "None", ""},\n                                            NN::EvalFile{EvalFileDefaultNameSmall, "None", ""})', 'std::make_unique<NN::Networks>(NN::EvalFile{EvalFileDefaultNameBig, "None", ""})'),
+        ('\n    options.add(  //\n      "EvalFileSmall", Option(EvalFileDefaultNameSmall, [this](const Option& o) {\n          load_small_network(o);\n          return std::nullopt;\n      }));\n', '\n'),
+        ('    networks->small.verify(options["EvalFileSmall"], onVerifyNetworks);\n', ''),
+        ('        networks_.small.load(binaryDirectory, options["EvalFileSmall"]);\n', ''),
+        ('\nvoid Engine::load_small_network(const std::string& file) {\n    networks.modify_and_replicate(\n      [this, &file](NN::Networks& networks_) { networks_.small.load(binaryDirectory, file); });\n    threads.clear();\n    threads.ensure_network_replicated();\n}\n', '\n'),
+        ('        networks_.small.save(files[1].first);\n', ''),
+    ],
+    "src/engine.h": [
+        ('    void load_small_network(const std::string& file);\n', ''),
+    ],
+    "src/evaluate.cpp": [
+        ('    bool smallNet           = use_smallnet(pos);\n    auto [psqt, positional] = smallNet ? networks.small.evaluate(pos, accumulators, caches.small)\n                                       : networks.big.evaluate(pos, accumulators, caches.big);\n', '    auto [psqt, positional] = networks.big.evaluate(pos, accumulators, caches.big);\n'),
+        ('\n    // Re-evaluate the position when higher eval accuracy is worth the time spent\n    if (smallNet && (std::abs(nnue) < 277))\n    {\n        std::tie(psqt, positional) = networks.big.evaluate(pos, accumulators, caches.big);\n        nnue                       = (125 * psqt + 131 * positional) / 128;\n        smallNet                   = false;\n    }\n', '\n'),
+    ],
+    "src/evaluate.h": [
+        ('#define EvalFileDefaultNameBig "nn-c288c895ea92.nnue"\n#define EvalFileDefaultNameSmall "nn-37f18f62d772.nnue"', f'#define EvalFileDefaultNameBig "{net}"'),
+    ],
+    "src/nnue/network.cpp": [
+        ('INCBIN(EmbeddedNNUEBig, EvalFileDefaultNameBig);\nINCBIN(EmbeddedNNUESmall, EvalFileDefaultNameSmall);', 'INCBIN(EmbeddedNNUEBig, EvalFileDefaultNameBig);'),
+        ('const unsigned char        gEmbeddedNNUEBigData[1]   = {0x0};\nconst unsigned char* const gEmbeddedNNUEBigEnd       = &gEmbeddedNNUEBigData[1];\nconst unsigned int         gEmbeddedNNUEBigSize      = 1;\nconst unsigned char        gEmbeddedNNUESmallData[1] = {0x0};\nconst unsigned char* const gEmbeddedNNUESmallEnd     = &gEmbeddedNNUESmallData[1];\nconst unsigned int         gEmbeddedNNUESmallSize    = 1;', 'const unsigned char        gEmbeddedNNUEBigData[1]   = {0x0};\nconst unsigned char* const gEmbeddedNNUEBigEnd       = &gEmbeddedNNUEBigData[1];\nconst unsigned int         gEmbeddedNNUEBigSize      = 1;'),
+        ('EmbeddedNNUE get_embedded(EmbeddedNNUEType type) {\n    if (type == EmbeddedNNUEType::BIG)\n        return EmbeddedNNUE(gEmbeddedNNUEBigData, gEmbeddedNNUEBigEnd, gEmbeddedNNUEBigSize);\n    else\n        return EmbeddedNNUE(gEmbeddedNNUESmallData, gEmbeddedNNUESmallEnd, gEmbeddedNNUESmallSize);\n}', 'EmbeddedNNUE get_embedded(EmbeddedNNUEType type) {\n    return EmbeddedNNUE(gEmbeddedNNUEBigData, gEmbeddedNNUEBigEnd, gEmbeddedNNUEBigSize);\n}'),
+        ('\ntemplate class Network<NetworkArchitecture<TransformedFeatureDimensionsSmall, L2Small, L3Small>,\n                       FeatureTransformer<TransformedFeatureDimensionsSmall>>;\n', '\n'),
+    ],
+    "src/nnue/network.h": [
+        ('enum class EmbeddedNNUEType {\n    BIG,\n    SMALL,\n};', 'enum class EmbeddedNNUEType {\n    BIG,\n};'),
+        ('// Definitions of the network types\nusing SmallFeatureTransformer = FeatureTransformer<TransformedFeatureDimensionsSmall>;\nusing SmallNetworkArchitecture =\n  NetworkArchitecture<TransformedFeatureDimensionsSmall, L2Small, L3Small>;\n\nusing BigFeatureTransformer  = FeatureTransformer<TransformedFeatureDimensionsBig>;', '// Definitions of the network types\nusing BigFeatureTransformer  = FeatureTransformer<TransformedFeatureDimensionsBig>;'),
+        ('using NetworkBig   = Network<BigNetworkArchitecture, BigFeatureTransformer>;\nusing NetworkSmall = Network<SmallNetworkArchitecture, SmallFeatureTransformer>;\n\n\nstruct Networks {\n    Networks(EvalFile bigFile, EvalFile smallFile) :\n        big(bigFile, EmbeddedNNUEType::BIG),\n        small(smallFile, EmbeddedNNUEType::SMALL) {}\n\n    NetworkBig   big;\n    NetworkSmall small;\n};', 'using NetworkBig   = Network<BigNetworkArchitecture, BigFeatureTransformer>;\n\n\nstruct Networks {\n    Networks(EvalFile bigFile) :\n        big(bigFile, EmbeddedNNUEType::BIG) {}\n\n    NetworkBig   big;\n};'),
+        ('        Stockfish::hash_combine(h, networks.big);\n        Stockfish::hash_combine(h, networks.small);', '        Stockfish::hash_combine(h, networks.big);'),
+    ],
+    "src/nnue/nnue_accumulator.cpp": [
+        ('    constexpr bool UseThreats = (Dimensions == TransformedFeatureDimensionsBig);', '    constexpr bool UseThreats = true;'),
+        ('\ntemplate void AccumulatorStack::evaluate<TransformedFeatureDimensionsSmall>(\n  const Position&                                              pos,\n  const FeatureTransformer<TransformedFeatureDimensionsSmall>& featureTransformer,\n  AccumulatorCaches::Cache<TransformedFeatureDimensionsSmall>& cache) noexcept;\n', '\n'),
+    ],
+    "src/nnue/nnue_accumulator.h": [
+        ('        big.clear(networks.big);\n        small.clear(networks.small);', '        big.clear(networks.big);'),
+        ('    Cache<TransformedFeatureDimensionsBig>   big;\n    Cache<TransformedFeatureDimensionsSmall> small;', '    Cache<TransformedFeatureDimensionsBig>   big;'),
+        ('    Accumulator<TransformedFeatureDimensionsBig>   accumulatorBig;\n    Accumulator<TransformedFeatureDimensionsSmall> accumulatorSmall;', '    Accumulator<TransformedFeatureDimensionsBig>   accumulatorBig;'),
+        ('        static_assert(Size == TransformedFeatureDimensionsBig\n                        || Size == TransformedFeatureDimensionsSmall,\n                      "Invalid size for accumulator");\n\n        if constexpr (Size == TransformedFeatureDimensionsBig)\n            return accumulatorBig;\n        else if constexpr (Size == TransformedFeatureDimensionsSmall)\n            return accumulatorSmall;', '        static_assert(Size == TransformedFeatureDimensionsBig,\n                      "Invalid size for accumulator");\n\n        return accumulatorBig;'),
+        ('        accumulatorBig.computed.fill(false);\n        accumulatorSmall.computed.fill(false);', '        accumulatorBig.computed.fill(false);'),
+    ],
+    "src/nnue/nnue_architecture.h": [
+        ('constexpr IndexType TransformedFeatureDimensionsBig = 1024;\nconstexpr int       L2Big                           = 15;\nconstexpr int       L3Big                           = 32;\n\nconstexpr IndexType TransformedFeatureDimensionsSmall = 128;\nconstexpr int       L2Small                           = 15;\nconstexpr int       L3Small                           = 32;', 'constexpr IndexType TransformedFeatureDimensionsBig = 128;\nconstexpr int       L2Big                           = 15;\nconstexpr int       L3Big                           = 32;'),
+    ],
+    "src/nnue/nnue_feature_transformer.h": [
+        ('    static constexpr bool UseThreats =\n      (TransformedFeatureDimensions == TransformedFeatureDimensionsBig);', '    static constexpr bool UseThreats = true;'),
+    ],
+}
+
+for relative, changes in replacements.items():
+    path = root / relative
+    text = path.read_text()
+    for old, new in changes:
+        if old in text:
+            text = text.replace(old, new)
+        elif new not in text:
+            raise SystemExit(f"Stockfish smallnet patch pattern not found in {relative}: {old[:80]!r}")
+    path.write_text(text)
+PY
+}
+
 # ─── Stockfish ───────────────────────────────────────────────────────
 build_stockfish() {
   src="$third_party/stockfish"
@@ -128,6 +219,19 @@ build_stockfish() {
   if [ ! -f "$make_dir/Makefile" ]; then
     make_dir="$src"
   fi
+
+  # source: https://github.com/lichess-org/stockfish-web. sf_18 smallnet.
+  if [ ! -f "$make_dir/$stockfish_smallnet" ] || [ "$(sha256 "$make_dir/$stockfish_smallnet" | cut -c 1-12)" != "4ca89e4b3abf" ]; then
+    rm -f "$make_dir/$stockfish_smallnet"
+    download_file "$stockfish_smallnet_url" "$make_dir/$stockfish_smallnet"
+  fi
+  if [ "$(sha256 "$make_dir/$stockfish_smallnet" | cut -c 1-12)" != "4ca89e4b3abf" ]; then
+    echo "downloaded Stockfish smallnet failed SHA256 prefix check: $make_dir/$stockfish_smallnet" >&2
+    exit 1
+  fi
+  patch_stockfish_smallnet "$make_dir" "$stockfish_smallnet"
+  make -C "$make_dir" clean >/dev/null 2>&1 || true
+
   case "$target_os-$target_arch" in
     darwin-arm64)
       make -C "$make_dir" -j "${JOBS:-2}" build >/dev/null 2>&1
@@ -296,7 +400,7 @@ for f in "$embed_dir"/*-"$target"; do
     c-ray-*)            var="cRay"; bench="c-ray"; src_url="https://github.com/vkoskiv/c-ray"; lic="MIT"; cmd="c-ray scene.json"; bf="make OPT=${OPT:--O2}" ;;
     sqlite-speedtest-*) var="sqliteSpeedtest"; bench="sqlite-speedtest"; src_url="https://github.com/sqlite/sqlite"; lic="Public Domain"; cmd="sqlite-speedtest --memdb --size N --repeat 1 --testset main"; bf="-O2 -DSQLITE_THREADSAFE=0" ;;
     sysbench-*)         var="sysbenchWorker"; bench="sysbench"; src_url="https://github.com/akopytov/sysbench"; lic="GPL-2.0-or-later"; cmd="sysbench cpu --threads=N run"; bf="--without-mysql --without-pgsql" ;;
-    stockfish-*)        var="stockfishWorker"; bench="stockfish"; src_url="https://github.com/official-stockfish/Stockfish"; lic="GPL-3.0"; cmd="stockfish speedtest N 128 S"; bf="build ARCH=default" ;;
+    stockfish-*)        var="stockfishWorker"; bench="stockfish"; src_url="https://github.com/official-stockfish/Stockfish"; lic="GPL-3.0"; cmd="stockfish speedtest N 128 S"; bf="build ARCH=default NNUE=$stockfish_smallnet" ;;
     openssl-speed-*)    var="opensslSpeed"; bench="openssl-speed"; src_url="https://github.com/openssl/openssl"; lic="Apache-2.0"; cmd="openssl speed"; bf="no-shared no-dso no-engine" ;;
     zstd-*)             var="zstdWorker"; bench="zstd"; src_url="https://github.com/facebook/zstd"; lic="BSD-3-Clause"; cmd="zstd -b1"; bf="libzstd.a" ;;
     ggml-ml-kernel-*)   var="ggmlMlKernel"; bench="ggml-ml-kernel"; src_url="https://github.com/ggml-org/llama.cpp"; lic="MIT"; cmd="ggml-ml-kernel --threads N"; bf="-O2 -lggml -lggml-cpu" ;;
