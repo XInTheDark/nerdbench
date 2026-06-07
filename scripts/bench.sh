@@ -3,11 +3,6 @@ set -eu
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
-repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-
-if command -v go >/dev/null 2>&1 && [ -f "$repo_root/go.mod" ] && [ ! -x "$repo_root/bin/nerdbench-${os}-${arch}" ]; then
-  exec go run "$repo_root/cmd/nerdbench" run "$@"
-fi
 
 case "$os" in
   linux) os="linux" ;;
@@ -22,15 +17,11 @@ esac
 
 asset="nerdbench-${os}-${arch}"
 
-if [ -x "$repo_root/bin/$asset" ]; then
-  exec "$repo_root/bin/$asset" run "$@"
+if [ -x "./bin/$asset" ]; then
+  exec "./bin/$asset" run "$@"
 fi
 
-base_url="${NERDBENCH_BASE_URL:-}"
-if [ -z "$base_url" ]; then
-  echo "NERDBENCH_BASE_URL is not set and no local binary/go toolchain is available" >&2
-  exit 1
-fi
+base_url="${NERDBENCH_BASE_URL:-https://github.com/XInTheDark/nerdbench/releases/latest/download}"
 
 tmp="${TMPDIR:-/tmp}/nerdbench.$$"
 mkdir -p "$tmp"
