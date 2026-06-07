@@ -7,6 +7,8 @@
 /internal/assets/embedded/*
 !/internal/assets/embedded/.gitkeep
 /calibration/runs/*/
+/calibration/baselines/*/
+!/calibration/baselines/.gitkeep
 !/calibration/runs/.gitkeep
 *.json.tmp
 PLAN.md
