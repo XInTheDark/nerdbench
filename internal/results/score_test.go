@@ -23,7 +23,7 @@ func TestScoreMetric(t *testing.T) {
 			"bench/ops/single": 50,
 		},
 	}
-	got := ScoreMetric("bench", "single", "ops", 100, nil, b)
+	got := ScoreMetric("bench", "multi", "ops", 100, nil, b)
 	if got != 2000 {
 		t.Fatalf("score = %v, want 2000", got)
 	}
@@ -61,8 +61,11 @@ func TestLoadBaselineBytes(t *testing.T) {
 	if got := b.Metrics["sqlite-speedtest/tests_per_second/single"]; got != 12.5 {
 		t.Fatalf("single baseline = %v, want 12.5", got)
 	}
-	if got := ScoreMetric("sqlite-speedtest", "multi", "tests_per_second", 100, nil, b); got != 2000 {
-		t.Fatalf("multi score = %v, want 2000", got)
+	if got := b.Metrics["sqlite-speedtest/tests_per_second/multi"]; got != 0 {
+		t.Fatalf("multi baseline = %v, want ignored", got)
+	}
+	if got := ScoreMetric("sqlite-speedtest", "multi", "tests_per_second", 100, nil, b); got != 8000 {
+		t.Fatalf("multi score = %v, want 8000", got)
 	}
 }
 

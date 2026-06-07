@@ -142,6 +142,8 @@ for path, doc in docs:
 
     run_keys = set()
     for b in doc.get("benchmarks", []):
+        if b.get("mode") != "single":
+            continue
         if b.get("status") != "ok":
             raise SystemExit(f"{path}: benchmark failed: {b.get('name')} {b.get('mode')}")
         metric = b.get("metric") or {}
@@ -157,7 +159,7 @@ for path, doc in docs:
         values.setdefault(key, []).append(value)
 
     if not run_keys:
-        raise SystemExit(f"{path}: result has no benchmark metrics")
+        raise SystemExit(f"{path}: result has no single-core benchmark metrics")
     if expected_keys is None:
         expected_keys = run_keys
     elif run_keys != expected_keys:

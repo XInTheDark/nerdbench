@@ -36,7 +36,6 @@ func DefaultBaseline() Baseline {
 	}
 	for _, name := range names {
 		metrics[name+"/single"] = 10000
-		metrics[name+"/multi"] = 40000
 	}
 	return Baseline{
 		ScoreVersion: "2026-06-07-dev",
@@ -104,6 +103,9 @@ func LoadBaselineBytes(name string, data []byte) (Baseline, error) {
 		if metric.Benchmark == "" || metric.Mode == "" || metric.Metric == "" || metric.BaselineValue <= 0 {
 			continue
 		}
+		if metric.Mode != "single" {
+			continue
+		}
 		metrics[metric.Benchmark+"/"+metric.Metric+"/"+metric.Mode] = metric.BaselineValue
 	}
 	if len(metrics) == 0 {
@@ -119,7 +121,7 @@ func LoadBaselineBytes(name string, data []byte) (Baseline, error) {
 }
 
 func ScoreMetric(benchmark, mode, metric string, value float64, direction any, baseline Baseline) float64 {
-	key := benchmark + "/" + metric + "/" + mode
+	key := benchmark + "/" + metric + "/single"
 	base := baseline.Metrics[key]
 	if base <= 0 || value <= 0 {
 		return 0

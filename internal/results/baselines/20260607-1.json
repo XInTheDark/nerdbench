@@ -16,17 +16,6 @@
   "metrics": [
     {
       "benchmark": "c-ray",
-      "mode": "multi",
-      "metric": "rays_per_second",
-      "unit": "rps",
-      "baseline_value": 21894359.274061352,
-      "statistic": "median",
-      "run_values": [
-        21894359.274061352
-      ]
-    },
-    {
-      "benchmark": "c-ray",
       "mode": "single",
       "metric": "rays_per_second",
       "unit": "rps",
@@ -34,17 +23,6 @@
       "statistic": "median",
       "run_values": [
         6663889.087490532
-      ]
-    },
-    {
-      "benchmark": "ggml-ml-kernel",
-      "mode": "multi",
-      "metric": "operations_per_second",
-      "unit": "ops",
-      "baseline_value": 75.570051,
-      "statistic": "median",
-      "run_values": [
-        75.570051
       ]
     },
     {
@@ -60,17 +38,6 @@
     },
     {
       "benchmark": "openssl-speed",
-      "mode": "multi",
-      "metric": "operations_per_second",
-      "unit": "ops",
-      "baseline_value": 539154.62,
-      "statistic": "median",
-      "run_values": [
-        539154.62
-      ]
-    },
-    {
-      "benchmark": "openssl-speed",
       "mode": "single",
       "metric": "operations_per_second",
       "unit": "ops",
@@ -78,17 +45,6 @@
       "statistic": "median",
       "run_values": [
         151828.19
-      ]
-    },
-    {
-      "benchmark": "sqlite-speedtest",
-      "mode": "multi",
-      "metric": "tests_per_second",
-      "unit": "tps",
-      "baseline_value": 3.6775599828657617,
-      "statistic": "median",
-      "run_values": [
-        3.6775599828657617
       ]
     },
     {
@@ -104,17 +60,6 @@
     },
     {
       "benchmark": "stockfish",
-      "mode": "multi",
-      "metric": "nodes_per_second",
-      "unit": "nps",
-      "baseline_value": 6189400.0,
-      "statistic": "median",
-      "run_values": [
-        6189400.0
-      ]
-    },
-    {
-      "benchmark": "stockfish",
       "mode": "single",
       "metric": "nodes_per_second",
       "unit": "nps",
@@ -122,17 +67,6 @@
       "statistic": "median",
       "run_values": [
         1797721.0
-      ]
-    },
-    {
-      "benchmark": "sysbench",
-      "mode": "multi",
-      "metric": "events_per_second",
-      "unit": "eps",
-      "baseline_value": 23411.39,
-      "statistic": "median",
-      "run_values": [
-        23411.39
       ]
     },
     {
@@ -148,17 +82,6 @@
     },
     {
       "benchmark": "tinycc-compile",
-      "mode": "multi",
-      "metric": "files_per_second",
-      "unit": "files/s",
-      "baseline_value": 4505.458894689519,
-      "statistic": "median",
-      "run_values": [
-        4505.458894689519
-      ]
-    },
-    {
-      "benchmark": "tinycc-compile",
       "mode": "single",
       "metric": "files_per_second",
       "unit": "files/s",
@@ -166,17 +89,6 @@
       "statistic": "median",
       "run_values": [
         1663.3173159572068
-      ]
-    },
-    {
-      "benchmark": "zstd",
-      "mode": "multi",
-      "metric": "megabytes_per_second",
-      "unit": "MB/s",
-      "baseline_value": 10874.875397309723,
-      "statistic": "median",
-      "run_values": [
-        10874.875397309723
       ]
     },
     {
