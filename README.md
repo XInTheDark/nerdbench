@@ -14,9 +14,7 @@ The scores are currently calibrated based on Ryzen 9 9950X, 4 cores. (Baseline: 
 curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh
 ```
 
-Progress is written to stderr. Text or JSON results are written to stdout, and `-o` always writes the full JSON result file.
-
-### to write to a file:
+### to write results to a file:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh -s -- --format json -o /tmp/nerdbench.json
@@ -80,4 +78,4 @@ Run NerdBench separately to create one or more JSON result files, then pass thos
 
 ---
 
-NerdBench is licensed under GPL-3.0-or-later. YABS may call NerdBench as a separate GPL program and parse its output, similar to how it calls other external benchmark tools.
+NerdBench is licensed under GPL-3.0-or-later. However, if you want to use it in a non-GPL-compatible script, you can still call NerdBench as a separate (external) GPL program and parse its output.
