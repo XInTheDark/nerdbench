@@ -61,10 +61,12 @@ static_ldflags=""
 sysbench_extra_ldflags=""
 c_ray_static=""
 zstd_system_libs="HAVE_ZLIB=0 HAVE_LZMA=0 HAVE_LZ4=0"
+ggml_libs="-lggml -lggml-base -lggml-cpu -lc++"
 if [ "$target_os" = "linux" ]; then
   static_ldflags="-static"
   sysbench_extra_ldflags="--with-extra-ldflags=-all-static"
   c_ray_static="STATIC=1"
+  ggml_libs="-Wl,--start-group -lggml -lggml-base -lggml-cpu -Wl,--end-group -ldl"
 else
   zstd_system_libs=""
 fi
@@ -245,10 +247,10 @@ CEOF
   ${CXX:-g++} -O2 -std=c++17 \
     -I"$ggml_inc" -I"$src/include" -I"$src/src" \
     "$out_dir/ggml-bench.c" \
-    -L"$src/build/ggml/src" -lggml -lggml-base -lggml-cpu \
+    -L"$src/build/ggml/src" $ggml_libs \
     $static_ldflags \
     -lpthread -lm \
-    -o "$out_dir/ggml-ml-kernel-$target" 2>/dev/null || {
+    -o "$out_dir/ggml-ml-kernel-$target" || {
     echo "warning: ggml worker build failed" >&2
     return 1
   }
