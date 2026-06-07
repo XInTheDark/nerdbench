@@ -14,8 +14,9 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-          - goos: linux
-            goarch: arm64
+          # arm64 worker build is temporarily disabled.
+          # - goos: linux
+          #   goarch: arm64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

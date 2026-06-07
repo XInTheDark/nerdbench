@@ -65,11 +65,12 @@ Worker binaries must be built in a native environment for their target OS/arch. 
 ## Calibration
 
 ```sh
-scripts/calibrate.sh --score-version 2026-06-07-dev --runs 3 --profile smoke
-scripts/calibrate.sh --score-version 2026-06-07-dev --runs 3 --profile smoke --set-baseline
+scripts/bench.sh --profile smoke --format json --progress none -o /tmp/nerdbench-run-001.json
+scripts/calibrate.sh --score-version 2026-06-07-dev --result /tmp/nerdbench-run-001.json
+scripts/calibrate.sh --score-version 2026-06-07-dev --result /tmp/nerdbench-run-001.json --set-baseline
 ```
 
-Raw calibration runs are written to `calibration/runs/<score_version>/`. Generated baseline candidates are written to `calibration/baselines/<score_version>.json`. `--set-baseline` copies the generated candidate into `internal/results/baselines/<score_version>.json` if it does not already exist.
+Run NerdBench separately to create one or more JSON result files, then pass those files to `scripts/calibrate.sh` with `--result`. Generated baseline candidates are written to `calibration/baselines/<score_version>.json`. `--set-baseline` copies the generated candidate into `internal/results/baselines/<score_version>.json` if it does not already exist.
 
 ## YABS Integration
 

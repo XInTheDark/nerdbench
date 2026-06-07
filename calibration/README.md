@@ -5,14 +5,16 @@ Calibration runs define the raw baseline metrics used by a NerdBench score versi
 Expected workflow:
 
 ```sh
-scripts/calibrate.sh --score-version 2026-06-07 --runs 7 --profile standard
+scripts/bench.sh --profile standard --format json --progress none -o /tmp/nerdbench-run-001.json
+scripts/calibrate.sh --score-version 2026-06-07 --result /tmp/nerdbench-run-001.json
 ```
 
-The script should:
+For multiple calibration runs, create multiple result JSON files and pass each one with `--result`.
 
-1. Run NerdBench through `scripts/bench.sh`.
-2. Write raw run JSON files into `calibration/runs/<score_version>/`.
-3. Generate a reviewed baseline candidate in `calibration/baselines/<score_version>.json`.
-4. Leave promotion into `internal/results/baselines/<score_version>.json` as an explicit review step.
+The calibration flow should:
+
+1. Run NerdBench separately and write raw result JSON files.
+2. Generate a reviewed baseline candidate from those files in `calibration/baselines/<score_version>.json`.
+3. Leave promotion into `internal/results/baselines/<score_version>.json` as an explicit review step.
 
 Raw calibration runs may be large and noisy, so `calibration/runs/` should normally stay ignored except for selected published evidence.

@@ -1,78 +1,174 @@
 #!/usr/bin/env sh
 set -eu
 
+usage() {
+  cat >&2 <<'EOF'
+usage: scripts/calibrate.sh --score-version VERSION [--profile PROFILE] [--set-baseline] --result RESULT.json [...]
+       scripts/calibrate.sh --score-version VERSION [--profile PROFILE] [--set-baseline] RESULT.json [...]
+
+Create a baseline candidate from existing NerdBench JSON result files.
+
+Generate result files separately, for example:
+  scripts/bench.sh --profile standard --format json --progress none -o /tmp/nerdbench-run-001.json
+
+Options:
+  --score-version VERSION  baseline score version to write
+  --result FILE           existing NerdBench JSON result; may be repeated
+  --profile PROFILE       optional assertion; inferred from result JSON when omitted
+  --set-baseline          copy candidate into internal/results/baselines/ if absent
+  -h, --help              show this help
+EOF
+}
+
+need_value() {
+  if [ "$#" -lt 2 ]; then
+    echo "$1 requires a value" >&2
+    exit 1
+  fi
+}
+
 score_version=""
-runs="5"
-profile="standard"
-out_dir=""
+profile=""
 set_baseline="false"
+result_list="$(mktemp "${TMPDIR:-/tmp}/nerdbench-calibrate.XXXXXX")"
+trap 'rm -f "$result_list"' EXIT INT HUP TERM
+
+add_result() {
+  if [ -z "$1" ]; then
+    echo "empty result path" >&2
+    exit 1
+  fi
+  printf '%s\n' "$1" >>"$result_list"
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --score-version) score_version="$2"; shift 2 ;;
-    --runs) runs="$2"; shift 2 ;;
-    --profile) profile="$2"; shift 2 ;;
-    --out-dir) out_dir="$2"; shift 2 ;;
-    --set-baseline) set_baseline="true"; shift ;;
-    *) echo "unknown argument: $1" >&2; exit 1 ;;
+    --score-version)
+      need_value "$@"
+      score_version="$2"
+      shift 2
+      ;;
+    --result)
+      need_value "$@"
+      add_result "$2"
+      shift 2
+      ;;
+    --profile)
+      need_value "$@"
+      profile="$2"
+      shift 2
+      ;;
+    --set-baseline)
+      set_baseline="true"
+      shift
+      ;;
+    --runs|--out-dir)
+      echo "$1 is no longer supported; run NerdBench separately and pass result JSON with --result" >&2
+      exit 1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --*)
+      echo "unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+    *)
+      add_result "$1"
+      shift
+      ;;
   esac
 done
 
 if [ -z "$score_version" ]; then
   echo "--score-version is required" >&2
+  usage
   exit 1
 fi
 
-case "$runs" in
-  ''|*[!0-9]*) echo "--runs must be a positive integer" >&2; exit 1 ;;
-esac
-[ "$runs" -gt 0 ] || { echo "--runs must be > 0" >&2; exit 1; }
+if [ ! -s "$result_list" ]; then
+  echo "at least one result JSON file is required" >&2
+  usage
+  exit 1
+fi
 
 repo_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-out_dir="${out_dir:-$repo_root/calibration/runs/$score_version}"
 candidate="$repo_root/calibration/baselines/$score_version.json"
 baseline="$repo_root/internal/results/baselines/$score_version.json"
 
-mkdir -p "$out_dir" "$repo_root/calibration/baselines" "$repo_root/internal/results/baselines"
+mkdir -p "$repo_root/calibration/baselines" "$repo_root/internal/results/baselines"
 
-i=1
-while [ "$i" -le "$runs" ]; do
-  run_file="$out_dir/run-$(printf '%03d' "$i").json"
-  echo "calibration run $i/$runs -> $run_file" >&2
-  "$repo_root/scripts/bench.sh" --profile "$profile" --format json --progress none -o "$run_file" >/dev/null
-  i=$((i + 1))
-done
-
-python3 - "$score_version" "$profile" "$candidate" "$out_dir"/run-*.json <<'PY'
+python3 - "$score_version" "$profile" "$candidate" "$result_list" <<'PY'
 import json
 import statistics
 import sys
 from pathlib import Path
 
-score_version, profile, candidate, *run_files = sys.argv[1:]
+score_version, expected_profile, candidate, result_list_path = sys.argv[1:]
+
+with open(result_list_path, "r", encoding="utf-8") as f:
+    result_files = [line.rstrip("\n") for line in f if line.rstrip("\n")]
+
 docs = []
-for path in run_files:
-    with open(path, "r", encoding="utf-8") as f:
-        docs.append((path, json.load(f)))
+for path in result_files:
+    p = Path(path)
+    if not p.is_file():
+        raise SystemExit(f"{path}: result file does not exist")
+    with p.open("r", encoding="utf-8") as f:
+        try:
+            docs.append((path, json.load(f)))
+        except json.JSONDecodeError as e:
+            raise SystemExit(f"{path}: invalid JSON: {e}") from e
 
 if not docs:
-    raise SystemExit("no run files")
+    raise SystemExit("no result files")
 
-first = docs[0][1]
+first_path, first = docs[0]
+profile = first.get("profile")
+if not profile:
+    raise SystemExit(f"{first_path}: profile is required")
+if expected_profile and profile != expected_profile:
+    raise SystemExit(f"{first_path}: profile mismatch: got {profile!r}, expected {expected_profile!r}")
+
+values = {}
+expected_keys = None
 for path, doc in docs:
     if doc.get("profile") != profile:
-        raise SystemExit(f"{path}: profile mismatch")
+        raise SystemExit(f"{path}: profile mismatch: got {doc.get('profile')!r}, expected {profile!r}")
     if doc.get("status") != "ok":
         raise SystemExit(f"{path}: run status is not ok")
 
-values = {}
-for path, doc in docs:
+    run_keys = set()
     for b in doc.get("benchmarks", []):
         if b.get("status") != "ok":
             raise SystemExit(f"{path}: benchmark failed: {b.get('name')} {b.get('mode')}")
-        metric = b.get("metric", {})
+        metric = b.get("metric") or {}
         key = (b.get("name"), b.get("mode"), metric.get("name"), metric.get("unit"))
-        values.setdefault(key, []).append(float(metric.get("value", 0)))
+        if any(part in ("", None) for part in key):
+            raise SystemExit(f"{path}: benchmark has incomplete metric identity")
+        value = float(metric.get("value", 0))
+        if value <= 0:
+            raise SystemExit(f"{path}: benchmark has non-positive metric value: {b.get('name')} {b.get('mode')}")
+        if key in run_keys:
+            raise SystemExit(f"{path}: duplicate benchmark metric: {key}")
+        run_keys.add(key)
+        values.setdefault(key, []).append(value)
+
+    if not run_keys:
+        raise SystemExit(f"{path}: result has no benchmark metrics")
+    if expected_keys is None:
+        expected_keys = run_keys
+    elif run_keys != expected_keys:
+        missing = sorted(expected_keys - run_keys)
+        extra = sorted(run_keys - expected_keys)
+        detail = []
+        if missing:
+            detail.append(f"missing {missing}")
+        if extra:
+            detail.append(f"extra {extra}")
+        raise SystemExit(f"{path}: benchmark metric set mismatch: {'; '.join(detail)}")
 
 metrics = []
 for (benchmark, mode, metric, unit), vals in sorted(values.items()):
