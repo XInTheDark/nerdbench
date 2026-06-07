@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: scripts/build-workers.sh
+      - run: go test ./...
+      - run: go run ./cmd/nerdbench run --profile smoke --format json --progress none -o smoke.json
+      - run: python3 -m json.tool smoke.json >/dev/null
+      - run: |
+          python3 -c "
+          import json
+          doc = json.load(open('smoke.json'))
+          assert doc['status'] == 'ok', f'status = {doc[\"status\"]}'
+          assert doc['scores']['single'] > 0
+          assert doc['scores']['multi'] > 0
+          assert doc['provenance']['baseline_hash']
+          for b in doc['benchmarks']:
+              assert b['metric']['value'] > 0, f'{b[\"name\"]} has no value'
+          print('ci json contract ok')
+          "

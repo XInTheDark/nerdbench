@@ -1,0 +1,3 @@
+Promoted baseline JSON files are embedded from this directory.
+
+Keep released baseline files immutable. The loader ignores this placeholder.

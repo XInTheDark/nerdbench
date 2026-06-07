@@ -1,0 +1,22 @@
+{
+  "score_version": "2026-06-07-dev",
+  "profile": "standard",
+  "metrics": [
+    {"benchmark": "sysbench", "mode": "single", "metric": "events_per_second", "unit": "eps", "baseline_value": 10000},
+    {"benchmark": "sysbench", "mode": "multi", "metric": "events_per_second", "unit": "eps", "baseline_value": 40000},
+    {"benchmark": "c-ray", "mode": "single", "metric": "rays_per_second", "unit": "rps", "baseline_value": 10000},
+    {"benchmark": "c-ray", "mode": "multi", "metric": "rays_per_second", "unit": "rps", "baseline_value": 40000},
+    {"benchmark": "stockfish", "mode": "single", "metric": "nodes_per_second", "unit": "nps", "baseline_value": 10000},
+    {"benchmark": "stockfish", "mode": "multi", "metric": "nodes_per_second", "unit": "nps", "baseline_value": 40000},
+    {"benchmark": "sqlite-speedtest", "mode": "single", "metric": "tests_per_second", "unit": "tps", "baseline_value": 10000},
+    {"benchmark": "sqlite-speedtest", "mode": "multi", "metric": "tests_per_second", "unit": "tps", "baseline_value": 40000},
+    {"benchmark": "openssl-speed", "mode": "single", "metric": "operations_per_second", "unit": "ops", "baseline_value": 10000},
+    {"benchmark": "openssl-speed", "mode": "multi", "metric": "operations_per_second", "unit": "ops", "baseline_value": 40000},
+    {"benchmark": "zstd", "mode": "single", "metric": "megabytes_per_second", "unit": "MB/s", "baseline_value": 10000},
+    {"benchmark": "zstd", "mode": "multi", "metric": "megabytes_per_second", "unit": "MB/s", "baseline_value": 40000},
+    {"benchmark": "ggml-ml-kernel", "mode": "single", "metric": "operations_per_second", "unit": "ops", "baseline_value": 10000},
+    {"benchmark": "ggml-ml-kernel", "mode": "multi", "metric": "operations_per_second", "unit": "ops", "baseline_value": 40000},
+    {"benchmark": "tinycc-compile", "mode": "single", "metric": "files_per_second", "unit": "files/s", "baseline_value": 10000},
+    {"benchmark": "tinycc-compile", "mode": "multi", "metric": "files_per_second", "unit": "files/s", "baseline_value": 40000}
+  ]
+}

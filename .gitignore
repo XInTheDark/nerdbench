@@ -1,0 +1,12 @@
+/bin/
+/dist/
+/build/workers/
+/build/embedded/
+/third_party/src/
+/internal/assets/generated_workers.go
+/internal/assets/embedded/*
+!/internal/assets/embedded/.gitkeep
+/calibration/runs/*/
+!/calibration/runs/.gitkeep
+*.json.tmp
+PLAN.md
