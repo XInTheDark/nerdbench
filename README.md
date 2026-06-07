@@ -1,28 +1,32 @@
-# NerdBench
+# nerdbench
 
-NerdBench is a **single-binary** CPU benchmark intended for server benchmarking.
+NerdBench is a **single-binary** CPU benchmark for server benchmarking.
 
 It's essentially a Go wrapper for a bunch of test modules. These include: C-Ray, SQLite speedtest, sysbench CPU, Stockfish, OpenSSL speed, zstd, ggml ML kernel, and TinyCC compile. They are embedded inside the binary so you don't have to build anything. 
 
-NerdBench reports both single-core and multi-core scores. The scores are based on a calibrated baseline of 1000. It can also write detailed results to a json file, allowing you to use it in other scripts.
+NerdBench reports both single-core and multi-core scores. It can also write detailed results to a json file, allowing you to use it in other scripts.
 
-## Run
+The scores are currently calibrated based on Ryzen 9 9950X, 4 cores. (Baseline: 1000)
+
+## one liner to run
 
 ```sh
-go run ./cmd/nerdbench run --profile smoke
-go run ./cmd/nerdbench run --profile smoke --format json -o result.json
+curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh
 ```
 
 Progress is written to stderr. Text or JSON results are written to stdout, and `-o` always writes the full JSON result file.
 
-### Exit Codes
+### to write to a file:
 
-- Exit code `0`: all selected test modules passed.
-- Exit code `1`: one or more test modules failed, or a usage error occurred.
+```sh
+curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh -s -- --format json -o /tmp/nerdbench.json
+```
 
-Both text and JSON output return non-zero when any test module fails.
+---
 
 ### Profiles
+
+use with `--profile`
 
 | Profile    | Target Runtime | Description |
 |------------|----------------|-------------|
@@ -72,18 +76,8 @@ scripts/calibrate.sh --score-version 2026-06-07-dev --result /tmp/nerdbench-run-
 
 Run NerdBench separately to create one or more JSON result files, then pass those files to `scripts/calibrate.sh` with `--result`. Generated baseline candidates are written to `calibration/baselines/<score_version>.json`. `--set-baseline` copies the generated candidate into `internal/results/baselines/<score_version>.json` if it does not already exist.
 
-## YABS Integration
 
-NerdBench can be called as an external benchmark tool. For example, you can
 
-1. Download the appropriate Linux binary via `scripts/bench.sh`
-2. Parse JSON output (`--format json`) for programmatic consumption
-3. Parse text output for human-readable display
-
-Example:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/XInTheDark/nerdbench/main/bench.sh | sh -s -- --profile standard --format json --progress none -o /tmp/nerdbench.json
-```
+---
 
 NerdBench is licensed under GPL-3.0-or-later. YABS may call NerdBench as a separate GPL program and parse its output, similar to how it calls other external benchmark tools.
