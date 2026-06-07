@@ -175,13 +175,18 @@ build_ggml() {
     -DCMAKE_BUILD_TYPE=Release \
     -DGGML_NATIVE=OFF \
     -DGGML_CPU=ON \
+    -DGGML_AVX=OFF \
+    -DGGML_AVX2=OFF \
+    -DGGML_F16C=OFF \
+    -DGGML_FMA=OFF \
+    -DGGML_LLAMAFILE=OFF \
     -DGGML_OPENMP=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF \
     -DLLAMA_BUILD_TESTS=OFF \
     -DLLAMA_BUILD_SERVER=OFF \
     -DBUILD_SHARED_LIBS=OFF \
     >/dev/null 2>&1
-  cmake --build "$src/build" -j "${JOBS:-2}" 2>/dev/null
+  cmake --build "$src/build" -j "${JOBS:-2}" --target ggml ggml-base ggml-cpu
 
   # Write the ggml benchmark worker
   cat > "$out_dir/ggml-bench.c" <<'CEOF'
@@ -262,9 +267,8 @@ CEOF
 build_tinycc() {
   src="$third_party/tinycc"
   (cd "$src" && ./configure --prefix="$(pwd)/install" --extra-ldflags="$static_ldflags" >/dev/null 2>&1)
-  (cd "$src" && make -j "${JOBS:-2}" >/dev/null 2>&1)
-  (cd "$src" && make install >/dev/null 2>&1)
-  install_worker "$src/install/bin/tcc" "$out_dir/tinycc-compile-$target"
+  (cd "$src" && make -j "${JOBS:-2}" tcc)
+  install_worker "$src/tcc" "$out_dir/tinycc-compile-$target"
 }
 
 # ─── Build all workers ───────────────────────────────────────────────
